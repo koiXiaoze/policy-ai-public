@@ -1,0 +1,238 @@
+name: Release Smoke Check
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Fresh environment smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      DATABASE_URL: sqlite:///data/release-smoke.db
+      NOTIFY_CHANNELS: ""
+      SOURCE_HEALTH_ALERT_ENABLED: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Check Python syntax
+        run: python -m compileall -q app main.py clean_garbled_data.py
+
+      - name: Initialize isolated SQLite database
+        run: |
+          python main.py init
+          python -m alembic current
+
+      - name: Prepare Compose smoke configuration
+        run: cp .env.example .env
+
+      - name: Verify Compose configuration
+        run: docker compose config --quiet
+
+      - name: Start API and check health
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m uvicorn app.web:app --host 127.0.0.1 --port 8000 > uvicorn-smoke.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            status=$(curl --silent --output /tmp/health.json --write-out '%{http_code}' http://127.0.0.1:8000/health || true)
+            if [ "$status" = "200" ]; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat uvicorn-smoke.log
+          exit 1
+
+
+  postgres:
+    name: PostgreSQL 16 integration test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: policy_test
+          POSTGRES_DB: policy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U policy_test -d policy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      DATABASE_URL: postgresql+psycopg://policy_test@127.0.0.1:5432/policy_test
+      NOTIFY_CHANNELS: ""
+      SOURCE_HEALTH_ALERT_ENABLED: "false"
+      AI_API_KEY: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Initialize and migrate PostgreSQL
+        run: |
+          python main.py init
+          python -m alembic current
+
+      - name: Verify PostgreSQL read/write round trip
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          from sqlalchemy import text
+          from app.database import engine
+
+          marker = "ci-postgres-roundtrip"
+          with engine.begin() as connection:
+              connection.execute(
+                  text("INSERT INTO policy (title, department, government_level, publish_time, url, source_name, content, summary, importance_score, created_time, updated_time) VALUES (:title, :department, :level, :published, :url, :source, :content, :summary, :score, :created, :updated)"),
+                  {
+                      "title": marker,
+                      "department": "CI",
+                      "level": "national",
+                      "published": datetime.now(),
+                      "url": "https://example.invalid/ci-postgres-roundtrip",
+                      "source": "CI",
+                      "content": "PostgreSQL integration verification",
+                      "summary": "temporary verification row",
+                      "score": 1.0,
+                      "created": datetime.now(),
+                      "updated": datetime.now(),
+                  },
+              )
+              row = connection.execute(
+                  text("SELECT title, source_name FROM policy WHERE title = :title"),
+                  {"title": marker},
+              ).mappings().one()
+              assert row["source_name"] == "CI"
+              connection.execute(
+                  text("DELETE FROM policy WHERE title = :title"),
+                  {"title": marker},
+              )
+          print("PostgreSQL read/write round trip passed")
+          PY
+
+      - name: Start API against PostgreSQL and check health
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m uvicorn app.web:app --host 127.0.0.1 --port 8000 > postgres-uvicorn.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            status=$(curl --silent --output /tmp/postgres-health.json --write-out '%{http_code}' http://127.0.0.1:8000/health || true)
+            if [ "$status" = "200" ]; then
+              cat /tmp/postgres-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat postgres-uvicorn.log
+          exit 1
+
+  docker:
+    name: Docker Compose end-to-end test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare Compose environment
+        run: cp .env.example .env
+
+      - name: Verify Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build and start containers
+        run: docker compose up --build --detach
+
+      - name: Check container health and API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' policy-agent 2>/dev/null || true)
+            if [ "$health" = "healthy" ]; then
+              curl --fail --silent --show-error http://127.0.0.1:8000/health
+              exit 0
+            fi
+            if [ "$health" = "unhealthy" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          docker compose ps
+          docker compose logs --no-color --tail=300
+          exit 1
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=500 || true
+
+      - name: Tear down containers
+        if: always()
+        run: docker compose down --volumes --remove-orphans

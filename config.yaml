@@ -1,0 +1,132 @@
+sources:
+- name: 国务院
+  level: 国家
+  website: https://www.gov.cn
+  list_url: https://www.gov.cn/zhengce/zuixin/
+  data_url: https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json
+  scraper_type: gov_cn
+  enabled: true
+  scrape_interval_hours: 24
+  description: 国务院最新政策
+  month_only: true
+  # 采集窗口（入库用）与推送窗口（日报 3/7 天）相互独立：
+  # 放宽采集可回填历史数据，供趋势分析使用，不会污染日报主列表。
+  days_back: 90
+  health_probe:
+    enabled: true
+    url: https://www.gov.cn/zhengce/zuixin/ZUIXINZHENGCE.json
+    format: json
+    json_required_keys:
+      - TITLE
+      - URL
+      - DOCRELPUBTIME
+    tls_warning_days: 21
+    timeout_seconds: 20
+- name: 湖北省人民政府
+  level: 省
+  website: https://www.hubei.gov.cn
+  list_url: https://www.hubei.gov.cn/zfwj/list1.shtml
+  scraper_type: provincial
+  enabled: true
+  scrape_interval_hours: 24
+  description: 湖北省政府政策文件
+  month_only: true
+  days_back: 90
+  # 栏目白名单：只收省政府政策文件栏目，排除厅局子站
+  # （jyt/rst/kjt/jxt 等）混入的招聘、招标、访谈、名单等非政策内容
+  policy_path_prefixes:
+    - /zfwj/
+  health_probe:
+    enabled: true
+    url: https://www.hubei.gov.cn/zfwj/list1.shtml
+    format: html
+    selector: div.list, ul.list, div.xxgk_list
+    tls_warning_days: 21
+    timeout_seconds: 20
+- name: 武汉市人民政府
+  level: 市
+  city: 武汉
+  website: https://www.wuhan.gov.cn
+  # 主站列表页为 JS 渲染，专用采集器用 Tavily 发现政策、直连抓取正文
+  scraper_type: wuhan
+  enabled: true
+  scrape_interval_hours: 24
+  description: 武汉市政府政策文件
+  days_back: 90
+  health_probe:
+    enabled: true
+    # 官方规范性文件列表页可访问，但静态 HTML 中没有政策条目，依赖前端二次加载。
+    # 当前没有经真实样本验证的 selector，因此刻意不配置 selector：巡检结果会保持
+    # unconfigured，而不是把首页或空壳列表误判为 ok。取得可复核样本后再补充配置。
+    url: https://www.wuhan.gov.cn/zwgk/xxgk/zfwj/gfxwj/
+    tls_warning_days: 21
+    timeout_seconds: 20
+- name: 十堰市人民政府
+  level: 市
+  city: 十堰
+  website: https://www.shiyan.gov.cn
+  list_url: https://www.shiyan.gov.cn/xxgk/zc_67263/qt/
+  scraper_type: shiyan
+  enabled: true
+  scrape_interval_hours: 24
+  description: 十堰市政府政策文件
+  days_back: 90
+  # 抓取栏目：规范性文件（政策主干）优先，其次其他主动公开
+  list_page_urls:
+    - https://www.shiyan.gov.cn/xxgk/zc_67263/xxgk_zcfg/
+    - https://www.shiyan.gov.cn/xxgk/zc_67263/qt/
+  # 栏目白名单：只收政策文件栏目，排除政府会议(/xxgk_fdgk)、
+  # 新闻(/ywdt)、子站(/show-*)、PDF 附件(/uploadfile)
+  policy_path_prefixes:
+    - /xxgk/zc_67263/xxgk_zcfg/
+    - /xxgk/zc_67263/qt/
+    - /xxgk/zc_67263/gfxwj/
+  health_probe:
+    enabled: true
+    url: https://www.shiyan.gov.cn/xxgk/zc_67263/qt/
+    format: html
+    tls_warning_days: 21
+    timeout_seconds: 20
+    selector: ul.list-group li.list-group-item
+- name: 人力资源和社会保障部
+  level: 国家
+  website: https://www.mohrss.gov.cn
+  list_url: https://www.mohrss.gov.cn/xxgk2020/zcwjk/
+  scraper_type: mohrss
+  enabled: true
+  scrape_interval_hours: 24
+  description: 人社部政策文件
+  month_only: true
+  days_back: 180
+  health_probe:
+    enabled: true
+    url: https://www.mohrss.gov.cn/xxgk2020/zcwjk/
+    tls_warning_days: 21
+    timeout_seconds: 20
+keywords:
+  important_sectors:
+  - 人工智能
+  - 数字经济
+  - 新能源
+  - 先进制造
+  - 网络安全
+  - 数据安全
+  - 低空经济
+  - 机器人
+  - 生物医药
+  - 新材料
+  people_livelihood:
+  - 教育
+  - 就业
+  - 住房
+  - 医疗
+  - 养老
+  - 人才政策
+  - 社会保障
+daily_report:
+  # 调度分析、Agent 报告工具与渲染上限共用此值。
+  # 采集、检索、批量分析和报告固定为 4 步；批量分析一次完成 TOP N。
+  top_n: 10
+  output_dir: reports
+  language: zh-CN
+

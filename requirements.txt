@@ -1,0 +1,29 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlalchemy>=2.0.0
+alembic>=1.13
+aiosqlite>=0.20.0
+# PostgreSQL 运行时驱动；未包含它时切换到 postgresql+psycopg 会在创建 Engine 时失败
+psycopg[binary]>=3.3.8
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+httpx>=0.27.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+trafilatura>=1.6.0
+pyyaml>=6.0
+apscheduler>=3.10.0
+jinja2>=3.1.0
+openai>=1.0.0
+click>=8.0.0
+cryptography>=42.0.0
+# 浏览器渲染（scrapers 用于提取 JS 渲染的政策正文）
+playwright>=1.40.0
+scrapling[all]>=0.5
+# Windows 无系统时区库，zoneinfo 依赖此包读取 Asia/Shanghai
+tzdata>=2024.1
+# main.py 在导入 app 前用 dotenv 加载 .env
+python-dotenv>=1.0.0
+# 企业微信智能机器人（API 模式，WebSocket 长连接）官方 SDK
+wecom-aibot-python-sdk>=1.0.2
